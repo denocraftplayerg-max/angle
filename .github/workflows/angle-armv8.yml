@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      DEPOT_TOOLS_UPDATE: "0"
+      DEPOT_TOOLS_UPDATE: "1"
       DEPOT_TOOLS_METRICS: "0"
       GCLIENT_PY3: "1"
 
@@ -58,6 +58,7 @@ jobs:
         run: |
           git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
           echo "$HOME/depot_tools" >> "$GITHUB_PATH"
+          "$HOME/depot_tools/update_depot_tools"
 
       - name: Sync ANGLE dependencies
         working-directory: ${{ github.workspace }}
