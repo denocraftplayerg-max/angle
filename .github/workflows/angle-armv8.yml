@@ -1,0 +1,161 @@
+name: ANGLE Android ARMv8.0 build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-arm64-v8:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      DEPOT_TOOLS_UPDATE: "0"
+      DEPOT_TOOLS_METRICS: "0"
+      GCLIENT_PY3: "1"
+
+    steps:
+      - name: Check out ANGLE
+        uses: actions/checkout@v4
+        with:
+          path: angle
+          fetch-depth: 1
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bison \
+            ccache \
+            curl \
+            flex \
+            git \
+            libasound2-dev \
+            libdrm-dev \
+            libglib2.0-dev \
+            libnss3-dev \
+            libpulse-dev \
+            libspeechd-dev \
+            libx11-xcb-dev \
+            libxcomposite-dev \
+            libxcursor-dev \
+            libxdamage-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxshmfence-dev \
+            libxtst-dev \
+            ninja-build \
+            pkg-config \
+            python3 \
+            unzip \
+            zip
+
+      - name: Bootstrap depot_tools
+        run: |
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
+          echo "$HOME/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Sync ANGLE dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          cat > .gclient <<'EOF'
+          solutions = [
+            {
+              "name": "angle",
+              "url": "https://github.com/denocraftplayerg-max/angle.git",
+              "managed": False,
+              "custom_deps": {},
+              "custom_vars": {},
+            },
+          ]
+          target_os = ["android"]
+          target_os_only = True
+          EOF
+          gclient sync --no-history --shallow --revision "angle@${GITHUB_SHA}"
+
+      - name: Install ANGLE build dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          ./angle/build/install-build-deps.sh --no-prompt
+          gclient runhooks
+
+      - name: Force ARMv8.0 code generation
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("angle/build/config/android/BUILD.gn")
+          text = path.read_text()
+          marker = "  asmflags = cflags\n"
+          addition = """  # Keep Android ARM64 output compatible with ARMv8.0 devices.
+            # ARMv8.0 has NEON/ASIMD, but not LSE atomics, CRC, FP16, dotprod,
+            # SVE, or the later optional ARM ISA extensions.
+            if (current_cpu == "arm64") {
+              cflags += [
+                "-march=armv8-a",
+                "-mno-outline-atomics",
+              ]
+            }
+          asmflags = cflags
+          """
+          if marker not in text:
+              raise SystemExit("android compiler config marker not found")
+          if "-mno-outline-atomics" not in text:
+              text = text.replace(marker, addition, 1)
+              path.write_text(text)
+          PY
+
+      - name: Generate ARMv8.0 GN build
+        working-directory: angle
+        run: |
+          gn gen out/AndroidArmv8 --args='
+            target_os = "android"
+            target_cpu = "arm64"
+            is_debug = false
+            is_component_build = false
+            symbol_level = 0
+            arm_control_flow_integrity = "none"
+            use_thin_lto = false
+            is_cfi = false
+            use_remoteexec = false
+            angle_assert_always_on = false
+            angle_build_tests = false
+            angle_enable_vulkan = true
+            angle_enable_gl = false
+          '
+
+      - name: Build ANGLE APK
+        working-directory: angle
+        run: autoninja -C out/AndroidArmv8 angle_chromium_apk
+
+      - name: Verify output architecture and instruction set
+        working-directory: angle
+        run: |
+          llvm_objdump="$(find third_party/llvm-build -type f -name llvm-objdump -perm -111 | head -1)"
+          test -n "$llvm_objdump"
+          find out/AndroidArmv8 -type f -name '*.so' -print0 | while IFS= read -r -d '' lib; do
+            file "$lib" | grep -q 'ELF 64-bit.*ARM aarch64'
+            "$llvm_objdump" -d "$lib" > "$lib.disassembly"
+            if grep -Eiq '\b(ldadd|ldclr|ldeor|ldset|swp|casp|stadd|stclr|steor|stset|crc32|crc32c|fcmla|fmlal|sdot|udot|bfmmla|sve)\b' "$lib.disassembly"; then
+              echo "Unsupported ARMv8.1+ instruction detected in $lib"
+              exit 1
+            fi
+          done
+          find out/AndroidArmv8 -type f -name '*.disassembly' -delete
+
+      - name: Upload APK and libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: angle-arm64-armv8-0
+          if-no-files-found: error
+          path: |
+            angle/out/AndroidArmv8/apks/AngleLibraries.apk
+            angle/out/AndroidArmv8/libEGL.so
+            angle/out/AndroidArmv8/libGLESv1_CM.so
+            angle/out/AndroidArmv8/libGLESv2.so
+            angle/out/AndroidArmv8/libfeature_support.so
