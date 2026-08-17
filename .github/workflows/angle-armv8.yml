@@ -17,7 +17,7 @@ jobs:
       DEPOT_TOOLS_UPDATE: "1"
       DEPOT_TOOLS_METRICS: "0"
       GCLIENT_PY3: "1"
-      DEBIAN_FRONTEND: "noninteractive" # Blindagem contra prompts do apt
+      DEBIAN_FRONTEND: "noninteractive"
 
     steps:
       - name: Check out ANGLE
@@ -63,7 +63,6 @@ jobs:
           ]
           target_os = ["android"]
           EOF
-          # --force evita conflito com a pasta 'angle' ja criada pelo checkout
           gclient sync --force --no-history --revision "angle@${GITHUB_SHA}"
 
       - name: Install build deps + runhooks
@@ -71,7 +70,6 @@ jobs:
         run: |
           export PATH="$HOME/depot_tools:$PATH"
           if [ -f ./angle/build/install-build-deps.sh ]; then
-            # Forca aceitacao dos termos e evita travamento por prompt
             echo "yes" | sudo ./angle/build/install-build-deps.sh --no-prompt || true
           fi
           gclient runhooks || true
@@ -113,7 +111,6 @@ jobs:
 
           test -n "$GN_SRC"
           
-          # CORRECAO: gn e um ARQUIVO. O mkdir anterior causava 'File exists'.
           cp -v "$GN_SRC" angle/buildtools/linux64/gn
           chmod +x angle/buildtools/linux64/gn
 
@@ -144,19 +141,16 @@ jobs:
               if path.name == "BUILD.gn" and "android" in str(path):
                   marker = "  asmflags = cflags\n"
                   
-                  # CORRECAO: Modificamos cflags primeiro (que ja existe no escopo).
-                  # A linha 'asmflags = cflags' e mantida no final, herdando as novas 
-                  # flags automaticamente, o que evita o erro de 'Undefined identifier'.
                   addition = """  # Force pure ARMv8.0 (no LSE/CRC/dotprod/SVE)
-  if (current_cpu == "arm64") {
-    cflags += [
-      "-march=armv8-a",
-      "-mtune=generic",
-      "-mno-outline-atomics",
-    ]
-  }
-  asmflags = cflags
-"""
+                  if (current_cpu == "arm64") {
+                    cflags += [
+                      "-march=armv8-a",
+                      "-mtune=generic",
+                      "-mno-outline-atomics",
+                    ]
+                  }
+                  asmflags = cflags
+                  """
                   if marker in text and "-mno-outline-atomics" not in text:
                       text = text.replace(marker, addition, 1)
                       patched = True
@@ -177,7 +171,6 @@ jobs:
         working-directory: ${{ github.workspace }}/angle
         run: |
           set -eux
-          # CORRECAO: Sintaxe bash corrigida para expansao correta de $HOME e $(pwd)
           export PATH="$HOME/depot_tools:$(pwd)/buildtools/linux64:$PATH"
 
           which gn
