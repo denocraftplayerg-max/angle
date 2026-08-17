@@ -17,6 +17,7 @@ jobs:
       DEPOT_TOOLS_UPDATE: "1"
       DEPOT_TOOLS_METRICS: "0"
       GCLIENT_PY3: "1"
+      DEBIAN_FRONTEND: "noninteractive" # Evita prompts interativos no apt
 
     steps:
       - name: Check out ANGLE
@@ -34,7 +35,7 @@ jobs:
             libpulse-dev libspeechd-dev libx11-xcb-dev libxcomposite-dev \
             libxcursor-dev libxdamage-dev libxi-dev libxrandr-dev \
             libxshmfence-dev libxtst-dev ninja-build pkg-config \
-            python3 python3-pip unzip zip file binutils
+            python3 python3-pip unzip zip file binutils lsb-release
 
       - name: Bootstrap depot_tools
         run: |
@@ -61,18 +62,17 @@ jobs:
             },
           ]
           target_os = ["android"]
-          target_os_only = True
           EOF
-          # Evitar --shallow em buildtools/CIPD (é o que faltava o gn)
-          gclient sync --no-history --revision "angle@${GITHUB_SHA}" || \
-          gclient sync --no-history --revision "angle@${GITHUB_SHA}"
+          # --force resolve a colisao com o actions/checkout que ja criou a pasta 'angle'
+          gclient sync --force --no-history --revision "angle@${GITHUB_SHA}"
 
       - name: Install build deps + runhooks
         working-directory: ${{ github.workspace }}
         run: |
           export PATH="$HOME/depot_tools:$PATH"
           if [ -f ./angle/build/install-build-deps.sh ]; then
-            ./angle/build/install-build-deps.sh --no-prompt || true
+            # Forca aceitacao dos termos e evita travamento por prompt
+            echo "yes" | sudo ./angle/build/install-build-deps.sh --no-prompt || true
           fi
           gclient runhooks || true
 
@@ -92,7 +92,6 @@ jobs:
           fi
 
           echo "GN missing — installing via CIPD"
-          # Sem heredoc: evita o erro "delimited by end-of-file"
           printf '%s\n' \
             '$VerifiedPlatform linux-amd64' \
             'gn/gn/${platform} latest' \
@@ -114,13 +113,10 @@ jobs:
           fi
 
           test -n "$GN_SRC"
+          
+          # CORRECAO: gn e um ARQUIVO. Removido o mkdir que causava File exists.
           cp -v "$GN_SRC" angle/buildtools/linux64/gn
           chmod +x angle/buildtools/linux64/gn
-
-          # Caminho alternativo que o gn.py por vezes procura
-          mkdir -p angle/buildtools/linux64/gn
-          cp -v "$GN_SRC" angle/buildtools/linux64/gn/gn
-          chmod +x angle/buildtools/linux64/gn/gn
 
           ls -la angle/buildtools/linux64/
           angle/buildtools/linux64/gn --version
@@ -181,14 +177,14 @@ jobs:
         working-directory: ${{ github.workspace }}/angle
         run: |
           set -eux
-          export PATH="\( HOME/depot_tools: \)(pwd)/buildtools/linux64:$PATH"
+          # CORRECAO: Sintaxe bash corrigida para expansao correta de $HOME e $(pwd)
+          export PATH="$HOME/depot_tools:$(pwd)/buildtools/linux64:$PATH"
 
           which gn
           gn --version
 
           mkdir -p out/AndroidArmv8
 
-          # Também sem heredoc problemático — printf linha a linha
           {
             echo 'target_os = "android"'
             echo 'target_cpu = "arm64"'
@@ -219,10 +215,7 @@ jobs:
         working-directory: ${{ github.workspace }}/angle
         run: |
           set -eux
-          export PATH="$HOME/depot_tools:$PATH"
-          if [ -x buildtools/linux64/gn ]; then
-            export PATH="$(pwd)/buildtools/linux64:$PATH"
-          fi
+          export PATH="$HOME/depot_tools:$(pwd)/buildtools/linux64:$PATH"
 
           if autoninja -C out/AndroidArmv8 -t targets 2>/dev/null | grep -q 'angle_chromium_apk'; then
             autoninja -C out/AndroidArmv8 angle_chromium_apk
