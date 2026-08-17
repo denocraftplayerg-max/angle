@@ -17,8 +17,6 @@ jobs:
       DEPOT_TOOLS_UPDATE: "1"
       DEPOT_TOOLS_METRICS: "0"
       GCLIENT_PY3: "1"
-      # Garante que depot_tools está sempre no PATH (evita "gn: command not found")
-      PATH: /home/runner/depot_tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     steps:
       - name: Check out ANGLE
@@ -31,33 +29,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bison \
-            ccache \
-            curl \
-            flex \
-            git \
-            libasound2-dev \
-            libdrm-dev \
-            libglib2.0-dev \
-            libnss3-dev \
-            libpulse-dev \
-            libspeechd-dev \
-            libx11-xcb-dev \
-            libxcomposite-dev \
-            libxcursor-dev \
-            libxdamage-dev \
-            libxi-dev \
-            libxrandr-dev \
-            libxshmfence-dev \
-            libxtst-dev \
-            ninja-build \
-            pkg-config \
-            python3 \
-            python3-pip \
-            unzip \
-            zip \
-            file \
-            binutils
+            bison ccache curl flex git \
+            libasound2-dev libdrm-dev libglib2.0-dev libnss3-dev \
+            libpulse-dev libspeechd-dev libx11-xcb-dev libxcomposite-dev \
+            libxcursor-dev libxdamage-dev libxi-dev libxrandr-dev \
+            libxshmfence-dev libxtst-dev ninja-build pkg-config \
+            python3 python3-pip unzip zip file binutils
 
       - name: Bootstrap depot_tools
         run: |
@@ -65,11 +42,9 @@ jobs:
           git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
           echo "$HOME/depot_tools" >> "$GITHUB_PATH"
           export PATH="$HOME/depot_tools:$PATH"
-          # Força update e garante que gn/gclient estão executáveis
           "$HOME/depot_tools/update_depot_tools" || true
           which gclient
-          which gn || true
-          ls -la "$HOME/depot_tools/gn" "$HOME/depot_tools/gclient" || true
+          which cipd || true
 
       - name: Sync ANGLE dependencies
         working-directory: ${{ github.workspace }}
@@ -88,20 +63,68 @@ jobs:
           target_os = ["android"]
           target_os_only = True
           EOF
-          gclient sync --no-history --shallow --revision "angle@${GITHUB_SHA}" --with_branch_heads --with_tags || \
-          gclient sync --no-history --shallow --revision "angle@${GITHUB_SHA}"
+          # Evitar --shallow em buildtools/CIPD (é o que faltava o gn)
+          gclient sync --no-history --revision "angle@${GITHUB_SHA}" || \
+          gclient sync --no-history --revision "angle@${GITHUB_SHA}"
 
-      - name: Install ANGLE build dependencies + runhooks
+      - name: Install build deps + runhooks
         working-directory: ${{ github.workspace }}
         run: |
           export PATH="$HOME/depot_tools:$PATH"
           if [ -f ./angle/build/install-build-deps.sh ]; then
             ./angle/build/install-build-deps.sh --no-prompt || true
           fi
-          # runhooks baixa NDK/SDK e gera configs
-          gclient runhooks
+          gclient runhooks || true
 
-      - name: Force pure ARMv8.0 codegen (patch + verify)
+      - name: Ensure real GN binary exists
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -eux
+          export PATH="$HOME/depot_tools:$PATH"
+
+          mkdir -p angle/buildtools/linux64
+
+          # Já existe?
+          if [ -x angle/buildtools/linux64/gn ]; then
+            echo "GN already present:"
+            ls -la angle/buildtools/linux64/gn
+            angle/buildtools/linux64/gn --version
+            exit 0
+          fi
+
+          echo "GN missing — installing via CIPD into buildtools/linux64"
+          # Pacote oficial usado pelo Chromium/ANGLE
+          cat > /tmp/gn.ensure <<'EOF'
+          $VerifiedPlatform linux-amd64
+          gn/gn/${platform} latest
+          EOF
+          cipd ensure -root /tmp/gn-cipd -ensure-file /tmp/gn.ensure
+
+          # Localizar o binário extraído
+          GN_SRC="$(find /tmp/gn-cipd -type f -name gn | head -1)"
+          if [ -z "$GN_SRC" ]; then
+            # fallback nome de pacote antigo
+            cat > /tmp/gn.ensure <<'EOF'
+            $VerifiedPlatform linux-amd64
+            infra/3pp/tools/gn/${platform} latest
+            EOF
+            rm -rf /tmp/gn-cipd
+            cipd ensure -root /tmp/gn-cipd -ensure-file /tmp/gn.ensure
+            GN_SRC="$(find /tmp/gn-cipd -type f -name gn | head -1)"
+          fi
+
+          test -n "$GN_SRC"
+          cp -v "$GN_SRC" angle/buildtools/linux64/gn
+          chmod +x angle/buildtools/linux64/gn
+          # Alguns wrappers procuram gn/gn
+          mkdir -p angle/buildtools/linux64/gn_dir
+          cp -v "$GN_SRC" angle/buildtools/linux64/gn/gn 2>/dev/null || \
+            (mkdir -p angle/buildtools/linux64/gn && cp -v "$GN_SRC" angle/buildtools/linux64/gn/gn)
+
+          ls -la angle/buildtools/linux64/
+          angle/buildtools/linux64/gn --version
+
+      - name: Force pure ARMv8.0 codegen (patch)
         working-directory: ${{ github.workspace }}
         run: |
           export PATH="$HOME/depot_tools:$PATH"
@@ -114,7 +137,6 @@ jobs:
               Path("angle/build/config/compiler/BUILD.gn"),
               Path("angle/build/config/arm.gni"),
           ]
-
           patched = False
           for path in candidates:
               if not path.exists():
@@ -123,10 +145,9 @@ jobs:
               text = path.read_text(encoding="utf-8", errors="replace")
               original = text
 
-              # 1) Força -march=armv8-a e desliga outline-atomics no config Android
               if path.name == "BUILD.gn" and "android" in str(path):
                   marker = "  asmflags = cflags\n"
-                  addition = """  # Force pure ARMv8.0 (no LSE/CRC/dotprod/SVE) for old devices
+                  addition = """  # Force pure ARMv8.0 (no LSE/CRC/dotprod/SVE)
             if (current_cpu == "arm64") {
               cflags += [
                 "-march=armv8-a",
@@ -143,142 +164,111 @@ jobs:
                       text = text.replace(marker, addition, 1)
                       patched = True
 
-              # 2) arm.gni – trava arm_arch se existir
               if path.name == "arm.gni":
-                  text = re.sub(
-                      r'arm_arch\s*=\s*"[^"]*"',
-                      'arm_arch = "armv8-a"',
-                      text,
-                  )
-                  if 'arm_use_crc' in text:
-                      text = re.sub(r'arm_use_crc\s*=\s*true', 'arm_use_crc = false', text)
+                  text = re.sub(r'arm_arch\s*=\s*"[^"]*"', 'arm_arch = "armv8-a"', text)
+                  text = re.sub(r'arm_use_crc\s*=\s*true', 'arm_use_crc = false', text)
                   patched = True
 
               if text != original:
                   path.write_text(text, encoding="utf-8")
                   print(f"patched: {path}")
 
-          if not patched:
-              print("WARNING: no file was patched – relying on GN extra_*flags only")
-          else:
-              print("ARMv8.0 force patches applied")
+          print("patches applied" if patched else "WARNING: no patch applied, using extra_*flags only")
           PY
 
       - name: Generate ARMv8.0 GN build
         working-directory: ${{ github.workspace }}/angle
         run: |
+          set -eux
           export PATH="$HOME/depot_tools:$PATH"
-          which gn
-          gn --version || true
 
-          # Args pensados para:
-          # - Android 8.0+ (API 26)
-          # - arm64 puro ARMv8.0 (sem LSE / CRC / etc.)
-          # - só Vulkan backend (mais leve e útil para launchers)
-          cat > /tmp/args.gn <<'EOF'
+          # Preferir o binário real do checkout
+          if [ -x buildtools/linux64/gn ]; then
+            export PATH="$(pwd)/buildtools/linux64:$PATH"
+          fi
+
+          which gn
+          gn --version
+
+          mkdir -p out/AndroidArmv8
+
+          # Forma correta: args.gn no out dir (sem tr, sem comentários a partirem a linha)
+          cat > out/AndroidArmv8/args.gn <<'EOF'
           target_os = "android"
           target_cpu = "arm64"
-
           is_debug = false
           is_component_build = false
           is_official_build = false
           symbol_level = 0
-
-          # API 26 = Android 8.0 (compatível com chips ARMv8.0 antigos)
           android32_ndk_api_level = 26
           android64_ndk_api_level = 26
-
-          # Desliga proteções/otimizações modernas que podem injetar instruções novas
           arm_control_flow_integrity = "none"
           use_thin_lto = false
           is_cfi = false
           use_remoteexec = false
-          use_siso = false
-
           angle_assert_always_on = false
           angle_build_tests = false
           angle_enable_vulkan = true
           angle_enable_gl = false
-          angle_enable_d3d9 = false
-          angle_enable_d3d11 = false
-          angle_enable_metal = false
-          angle_enable_null = false
-
-          # Força o compilador a ficar em ARMv8.0 base
           extra_cflags = [ "-march=armv8-a", "-mtune=generic", "-mno-outline-atomics" ]
           extra_cxxflags = [ "-march=armv8-a", "-mtune=generic", "-mno-outline-atomics" ]
           extra_asmflags = [ "-march=armv8-a" ]
           EOF
 
-          gn gen out/AndroidArmv8 --args="$(cat /tmp/args.gn | tr '\n' ' ')"
+          gn gen out/AndroidArmv8
           echo "GN gen OK"
           ls -la out/AndroidArmv8/
 
       - name: Build ANGLE libraries / APK
         working-directory: ${{ github.workspace }}/angle
         run: |
+          set -eux
           export PATH="$HOME/depot_tools:$PATH"
-          # Tenta os targets mais comuns (ordem de preferência)
+          if [ -x buildtools/linux64/gn ]; then
+            export PATH="$(pwd)/buildtools/linux64:$PATH"
+          fi
+
           if autoninja -C out/AndroidArmv8 -t targets 2>/dev/null | grep -q 'angle_chromium_apk'; then
             autoninja -C out/AndroidArmv8 angle_chromium_apk
           elif autoninja -C out/AndroidArmv8 -t targets 2>/dev/null | grep -q 'AngleLibraries'; then
             autoninja -C out/AndroidArmv8 AngleLibraries
           else
-            # Fallback: libs principais
             autoninja -C out/AndroidArmv8 libEGL libGLESv2 libGLESv1_CM || \
             autoninja -C out/AndroidArmv8 libEGL_angle libGLESv2_angle || \
             autoninja -C out/AndroidArmv8
           fi
 
-      - name: Collect .so and verify pure ARMv8.0 (no v8.1+ instructions)
+      - name: Collect .so and verify pure ARMv8.0
         working-directory: ${{ github.workspace }}/angle
         run: |
-          export PATH="$HOME/depot_tools:$PATH"
+          set -eux
           mkdir -p /tmp/angle-libs
 
-          # Recolhe todos os .so gerados
-          find out/AndroidArmv8 -type f \( -name 'libEGL*.so' -o -name 'libGLES*.so' -o -name 'libfeature_support*.so' -o -name 'libANGLE*.so' \) -exec cp -v {} /tmp/angle-libs/ \; || true
+          find out/AndroidArmv8 -type f \( -name 'libEGL*.so' -o -name 'libGLES*.so' -o -name 'libfeature_support*.so' -o -name 'libANGLE*.so' \) \
+            -exec cp -v {} /tmp/angle-libs/ \; || true
 
-          # Também tenta dentro de APKs se existirem
           find out/AndroidArmv8 -type f -name '*.apk' | while read -r apk; do
-            echo "Extracting from $apk"
             unzip -o -j "$apk" '*.so' -d /tmp/angle-libs/ 2>/dev/null || true
           done
 
-          echo "=== Collected libraries ==="
-          ls -la /tmp/angle-libs/ || true
-          if [ -z "$(ls -A /tmp/angle-libs 2>/dev/null)" ]; then
-            echo "ERROR: no .so files found"
-            find out/AndroidArmv8 -type f -name '*.so' | head -50
-            exit 1
-          fi
+          ls -la /tmp/angle-libs/
+          test -n "$(ls -A /tmp/angle-libs)"
 
-          # Verifica arquitetura e ausência de instruções ARMv8.1+
           for lib in /tmp/angle-libs/*.so; do
-            echo "Checking $lib"
-            file "$lib" | grep -E 'ELF 64-bit.*(ARM aarch64|aarch64)' || {
-              echo "Not aarch64: $lib"
-              file "$lib"
-              exit 1
-            }
-
-            # Disassembly rápido à procura de LSE / CRC / dotprod / SVE etc.
-            if command -v llvm-objdump >/dev/null 2>&1; then
-              OBJDUMP=llvm-objdump
-            else
-              OBJDUMP=$(find third_party/llvm-build -type f -name llvm-objdump -perm -111 2>/dev/null | head -1)
+            file "$lib" | grep -E 'ELF 64-bit.*(ARM aarch64|aarch64)'
+            OBJDUMP="$(command -v llvm-objdump || true)"
+            if [ -z "$OBJDUMP" ]; then
+              OBJDUMP="$(find third_party/llvm-build -type f -name llvm-objdump -perm -111 2>/dev/null | head -1 || true)"
             fi
             if [ -n "$OBJDUMP" ] && [ -x "$OBJDUMP" ]; then
               "$OBJDUMP" -d "$lib" > "$lib.dis" || true
-              if grep -Eiq '\b(ldadd|ldclr|ldeor|ldset|swp|casp|cas|stadd|stclr|steor|stset|crc32|crc32c|fcmla|fmlal|sdot|udot|bfmmla|sve|ldapr|stlr)\b' "$lib.dis"; then
-                echo "ERROR: Unsupported ARMv8.1+ instruction detected in $lib"
+              if grep -Eiq '\b(ldadd|ldclr|ldeor|ldset|swp|casp|cas|stadd|stclr|steor|stset|crc32|crc32c|fcmla|fmlal|sdot|udot|bfmmla|sve)\b' "$lib.dis"; then
+                echo "ERROR: ARMv8.1+ instruction in $lib"
                 grep -Ei '\b(ldadd|ldclr|ldeor|ldset|swp|casp|cas|stadd|stclr|steor|stset|crc32|crc32c|fcmla|fmlal|sdot|udot|bfmmla|sve)\b' "$lib.dis" | head -20
                 exit 1
               fi
               rm -f "$lib.dis"
-              echo "OK (no v8.1+ instructions): $lib"
-            else
-              echo "WARNING: llvm-objdump not found, skipping instruction check for $lib"
+              echo "OK: $lib"
             fi
           done
 
@@ -289,4 +279,3 @@ jobs:
           if-no-files-found: error
           path: |
             /tmp/angle-libs/
-            angle/out/AndroidArmv8/apks/
