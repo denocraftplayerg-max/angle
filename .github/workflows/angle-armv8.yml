@@ -17,7 +17,7 @@ jobs:
       DEPOT_TOOLS_UPDATE: "1"
       DEPOT_TOOLS_METRICS: "0"
       GCLIENT_PY3: "1"
-      DEBIAN_FRONTEND: "noninteractive" # Evita prompts interativos no apt
+      DEBIAN_FRONTEND: "noninteractive" # Blindagem contra prompts do apt
 
     steps:
       - name: Check out ANGLE
@@ -63,7 +63,7 @@ jobs:
           ]
           target_os = ["android"]
           EOF
-          # --force resolve a colisao com o actions/checkout que ja criou a pasta 'angle'
+          # --force evita conflito com a pasta 'angle' ja criada pelo checkout
           gclient sync --force --no-history --revision "angle@${GITHUB_SHA}"
 
       - name: Install build deps + runhooks
@@ -86,7 +86,6 @@ jobs:
 
           if [ -x angle/buildtools/linux64/gn ]; then
             echo "GN already present"
-            ls -la angle/buildtools/linux64/gn
             angle/buildtools/linux64/gn --version
             exit 0
           fi
@@ -114,7 +113,7 @@ jobs:
 
           test -n "$GN_SRC"
           
-          # CORRECAO: gn e um ARQUIVO. Removido o mkdir que causava File exists.
+          # CORRECAO: gn e um ARQUIVO. O mkdir anterior causava 'File exists'.
           cp -v "$GN_SRC" angle/buildtools/linux64/gn
           chmod +x angle/buildtools/linux64/gn
 
@@ -144,19 +143,20 @@ jobs:
 
               if path.name == "BUILD.gn" and "android" in str(path):
                   marker = "  asmflags = cflags\n"
+                  
+                  # CORRECAO: Modificamos cflags primeiro (que ja existe no escopo).
+                  # A linha 'asmflags = cflags' e mantida no final, herdando as novas 
+                  # flags automaticamente, o que evita o erro de 'Undefined identifier'.
                   addition = """  # Force pure ARMv8.0 (no LSE/CRC/dotprod/SVE)
-            if (current_cpu == "arm64") {
-              cflags += [
-                "-march=armv8-a",
-                "-mtune=generic",
-                "-mno-outline-atomics",
-              ]
-              asmflags += [
-                "-march=armv8-a",
-              ]
-            }
-          asmflags = cflags
-          """
+  if (current_cpu == "arm64") {
+    cflags += [
+      "-march=armv8-a",
+      "-mtune=generic",
+      "-mno-outline-atomics",
+    ]
+  }
+  asmflags = cflags
+"""
                   if marker in text and "-mno-outline-atomics" not in text:
                       text = text.replace(marker, addition, 1)
                       patched = True
