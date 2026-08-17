@@ -84,30 +84,30 @@ jobs:
 
           mkdir -p angle/buildtools/linux64
 
-          # Já existe?
           if [ -x angle/buildtools/linux64/gn ]; then
-            echo "GN already present:"
+            echo "GN already present"
             ls -la angle/buildtools/linux64/gn
             angle/buildtools/linux64/gn --version
             exit 0
           fi
 
-          echo "GN missing — installing via CIPD into buildtools/linux64"
-          # Pacote oficial usado pelo Chromium/ANGLE
-          cat > /tmp/gn.ensure <<'EOF'
-          $VerifiedPlatform linux-amd64
-          gn/gn/${platform} latest
-          EOF
+          echo "GN missing — installing via CIPD"
+          # Sem heredoc: evita o erro "delimited by end-of-file"
+          printf '%s\n' \
+            '$VerifiedPlatform linux-amd64' \
+            'gn/gn/${platform} latest' \
+            > /tmp/gn.ensure
+
           cipd ensure -root /tmp/gn-cipd -ensure-file /tmp/gn.ensure
 
-          # Localizar o binário extraído
           GN_SRC="$(find /tmp/gn-cipd -type f -name gn | head -1)"
+
           if [ -z "$GN_SRC" ]; then
-            # fallback nome de pacote antigo
-            cat > /tmp/gn.ensure <<'EOF'
-            $VerifiedPlatform linux-amd64
-            infra/3pp/tools/gn/${platform} latest
-            EOF
+            echo "Fallback package infra/3pp/tools/gn"
+            printf '%s\n' \
+              '$VerifiedPlatform linux-amd64' \
+              'infra/3pp/tools/gn/${platform} latest' \
+              > /tmp/gn.ensure
             rm -rf /tmp/gn-cipd
             cipd ensure -root /tmp/gn-cipd -ensure-file /tmp/gn.ensure
             GN_SRC="$(find /tmp/gn-cipd -type f -name gn | head -1)"
@@ -116,14 +116,15 @@ jobs:
           test -n "$GN_SRC"
           cp -v "$GN_SRC" angle/buildtools/linux64/gn
           chmod +x angle/buildtools/linux64/gn
-          # Alguns wrappers procuram gn/gn
-          mkdir -p angle/buildtools/linux64/gn_dir
-          cp -v "$GN_SRC" angle/buildtools/linux64/gn/gn 2>/dev/null || \
-            (mkdir -p angle/buildtools/linux64/gn && cp -v "$GN_SRC" angle/buildtools/linux64/gn/gn)
+
+          # Caminho alternativo que o gn.py por vezes procura
+          mkdir -p angle/buildtools/linux64/gn
+          cp -v "$GN_SRC" angle/buildtools/linux64/gn/gn
+          chmod +x angle/buildtools/linux64/gn/gn
 
           ls -la angle/buildtools/linux64/
           angle/buildtools/linux64/gn --version
-
+          
       - name: Force pure ARMv8.0 codegen (patch)
         working-directory: ${{ github.workspace }}
         run: |
@@ -180,45 +181,40 @@ jobs:
         working-directory: ${{ github.workspace }}/angle
         run: |
           set -eux
-          export PATH="$HOME/depot_tools:$PATH"
-
-          # Preferir o binário real do checkout
-          if [ -x buildtools/linux64/gn ]; then
-            export PATH="$(pwd)/buildtools/linux64:$PATH"
-          fi
+          export PATH="\( HOME/depot_tools: \)(pwd)/buildtools/linux64:$PATH"
 
           which gn
           gn --version
 
           mkdir -p out/AndroidArmv8
 
-          # Forma correta: args.gn no out dir (sem tr, sem comentários a partirem a linha)
-          cat > out/AndroidArmv8/args.gn <<'EOF'
-          target_os = "android"
-          target_cpu = "arm64"
-          is_debug = false
-          is_component_build = false
-          is_official_build = false
-          symbol_level = 0
-          android32_ndk_api_level = 26
-          android64_ndk_api_level = 26
-          arm_control_flow_integrity = "none"
-          use_thin_lto = false
-          is_cfi = false
-          use_remoteexec = false
-          angle_assert_always_on = false
-          angle_build_tests = false
-          angle_enable_vulkan = true
-          angle_enable_gl = false
-          extra_cflags = [ "-march=armv8-a", "-mtune=generic", "-mno-outline-atomics" ]
-          extra_cxxflags = [ "-march=armv8-a", "-mtune=generic", "-mno-outline-atomics" ]
-          extra_asmflags = [ "-march=armv8-a" ]
-          EOF
+          # Também sem heredoc problemático — printf linha a linha
+          {
+            echo 'target_os = "android"'
+            echo 'target_cpu = "arm64"'
+            echo 'is_debug = false'
+            echo 'is_component_build = false'
+            echo 'is_official_build = false'
+            echo 'symbol_level = 0'
+            echo 'android32_ndk_api_level = 26'
+            echo 'android64_ndk_api_level = 26'
+            echo 'arm_control_flow_integrity = "none"'
+            echo 'use_thin_lto = false'
+            echo 'is_cfi = false'
+            echo 'use_remoteexec = false'
+            echo 'angle_assert_always_on = false'
+            echo 'angle_build_tests = false'
+            echo 'angle_enable_vulkan = true'
+            echo 'angle_enable_gl = false'
+            echo 'extra_cflags = [ "-march=armv8-a", "-mtune=generic", "-mno-outline-atomics" ]'
+            echo 'extra_cxxflags = [ "-march=armv8-a", "-mtune=generic", "-mno-outline-atomics" ]'
+            echo 'extra_asmflags = [ "-march=armv8-a" ]'
+          } > out/AndroidArmv8/args.gn
 
           gn gen out/AndroidArmv8
           echo "GN gen OK"
           ls -la out/AndroidArmv8/
-
+          
       - name: Build ANGLE libraries / APK
         working-directory: ${{ github.workspace }}/angle
         run: |
