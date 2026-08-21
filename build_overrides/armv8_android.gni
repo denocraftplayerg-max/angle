@@ -20,7 +20,9 @@
 declare_args() {
   # ARMv8.0-A baseline architecture flag
   armv80_arch_flag = "-march=armv8-a"
-  
+}
+
+declare_args() {
   # Disable ARMv8.1+ extensions explicitly
   armv80_disable_extensions = [
     "-mno-outline-atomics",  # Disable LSE atomics (ARMv8.1)
@@ -32,7 +34,9 @@ declare_args() {
     "-mno-i8mm",             # Disable I8MM (ARMv8.2+)
     "-mno-bf16",             # Disable BF16 (ARMv8.6+)
   ]
-  
+}
+
+declare_args() {
   # Combined ARMv8.0-A strict flags
   armv80_strict_flags = armv80_arch_flag + armv80_disable_extensions
 }
