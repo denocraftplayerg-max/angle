@@ -2,105 +2,83 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# ARMv8.0-A strict configuration for Android AArch64
-# This file contains configuration to ensure ANGLE builds for Android
-# arm64-v8a target with strict ARMv8.0-A baseline ISA (no ARMv8.1+ extensions)
+# ARMv8.0-A strict configuration for Android AArch64.
+#
+# This file provides the ARMv8.0-A baseline configuration used by the
+# Android arm64 build. It intentionally does not select a newer ARM
+# architecture or CPU-specific tuning.
+#
+# The architecture baseline is:
+#   AArch64 / ARMv8.0-A
+#
+# The Android ABI remains:
+#   arm64-v8a
+#
+# Important:
+#   - Do not use -march=native.
+#   - Do not use -mcpu=native.
+#   - Do not use ARMv8.1-A or newer architecture targets.
+#   - Do not enable SVE/SVE2/I8MM/BF16 or other post-v8.0 extensions
+#     explicitly.
+#
+# Backend selection is intentionally NOT implemented here. ANGLE's existing
+# build configuration must remain responsible for selecting Vulkan. This file
+# only provides the ARMv8.0-A Android configuration.
 
-# Force ARMv8.0-A baseline for Android arm64 builds
-# ARMv8.0-A includes: NEON/Advanced SIMD (base), but NOT:
-# - ARMv8.1-A: LSE atomics, CRC32, FP16, Dot Product
-# - ARMv8.2-A: FP16 FMLA, SVE (optional), etc.
-# - ARMv8.3-A: Complex number, SVE2 (optional), etc.
-# - ARMv8.4-A: Dot Product (SIMD), SVE2, BF16, etc.
-# - ARMv8.5-A: BF16, etc.
-# - ARMv8.6-A: SVE2, etc.
-# - ARMv9-A: SVE2, BF16, MTE, etc.
 
-# Compiler flags for ARMv8.0-A strict compliance
 declare_args() {
-  # ARMv8.0-A baseline architecture flag and disable extensions
-  armv80_strict_flags = [
-    "-march=armv8-a",       # ARMv8.0-A baseline
-    "-mno-outline-atomics", # Disable LSE atomics (ARMv8.1)
-    "-mno-crc",            # Disable CRC32 (ARMv8.1)
-    "-mno-fp16",           # Disable FP16 (ARMv8.2)
-    "-mno-dotprod",        # Disable Dot Product (ARMv8.2/8.4)
-    "-mno-sve",            # Disable SVE (ARMv8.2+)
-    "-mno-sve2",           # Disable SVE2 (ARMv8.4+)
-    "-mno-i8mm",           # Disable I8MM (ARMv8.2+)
-    "-mno-bf16",           # Disable BF16 (ARMv8.6+)
-    "-mtune=generic",      # Prevent native CPU optimization
-  ]
+  # ARMv8.0-A strict mode.
+  #
+  # Keep this configurable so the configuration can be inspected and
+  # overridden by the GN build when necessary.
+  angle_armv80_strict = true
 }
 
-# Configuration for Android arm64 ARMv8.0-A strict builds
+
+# ARMv8.0-A compiler configuration.
+#
+# -march=armv8-a selects the ARMv8-A baseline rather than a newer ARM ISA.
+# -mtune=generic prevents CPU-specific tuning from being selected.
+#
+# Do not add -mcpu=native or -march=native here.
 config("armv80_android_config") {
-  if (is_android && target_cpu == "arm64") {
-    # Apply ARMv8.0-A strict architecture flags
-    cflags = armv80_strict_flags
-    cflags_c = armv80_strict_flags
-    cflags_cc = armv80_strict_flags
-    cflags_objc = armv80_strict_flags
-    cflags_objcc = armv80_strict_flags
-    
-    # Also apply to assembly flags
-    asmflags = armv80_strict_flags
-    
-    # Debug: Output architecture info
+  if (is_android && target_cpu == "arm64" && angle_armv80_strict) {
+    cflags = [
+      "-march=armv8-a",
+      "-mtune=generic",
+    ]
+
+    asmflags = [
+      "-march=armv8-a",
+    ]
+
     defines = [
       "ANGLE_ARMV80_STRICT=1",
     ]
   }
 }
 
-# Backend selection for Android ARMv8.0-A: Vulkan only
-# This ensures only Vulkan backend is enabled for Android builds
-declare_args() {
-  # For Android ARMv8.0-A strict builds, only Vulkan backend should be enabled
-  if (is_android) {
-    # Force Vulkan as the only backend
-    angle_force_vulkan_only_android = true
-    
-    # Disable all other backends for Android
-    angle_disable_gl_android = true
-    angle_disable_d3d11_android = true
-    angle_disable_metal_android = true
-    angle_disable_swiftshader_android = true
-    angle_disable_null_android = true
-    angle_disable_wgpu_android = true
-  }
-}
 
-# Android ARMv8.0-A backend configuration
-config("armv80_android_backend_config") {
-  if (is_android && angle_force_vulkan_only_android) {
-    # Ensure only Vulkan is enabled
+# Configuration intended to be added to ANGLE Android arm64 targets.
+#
+# This is kept separate from backend selection. Vulkan must be selected using
+# the existing ANGLE Vulkan build arguments/targets in this revision rather
+# than by injecting custom ANGLE_ENABLE_* preprocessor definitions.
+config("armv80_android_vulkan_config") {
+  if (is_android && target_cpu == "arm64" && angle_armv80_strict) {
     defines = [
-      "ANGLE_ENABLE_VULKAN=1",
-    ]
-    
-    # Explicitly disable other backends
-    defines += [
-      "ANGLE_ENABLE_D3D11=0",
-      "ANGLE_ENABLE_OPENGL=0",
-      "ANGLE_ENABLE_GL_DESKTOP_BACKEND=0",
-      "ANGLE_ENABLE_METAL=0",
-      "ANGLE_ENABLE_SWIFTSHADER=0",
-      "ANGLE_ENABLE_NULL=0",
-      "ANGLE_ENABLE_WGPU=0",
+      "ANGLE_ARMV80_STRICT=1",
     ]
   }
 }
 
-# Library naming configuration for Android ARMv8.0-A
-# Ensure libraries have _angle suffix for proper identification
+
+# Library names used by the Android launcher integration.
+#
+# These values are only configuration values. They do not rename an existing
+# ANGLE target by themselves. The actual target/output names must be verified
+# against the BUILD.gn files in this ANGLE revision.
 declare_args() {
-  if (is_android) {
-    # Force _angle suffix for Android builds
-    angle_libs_suffix = "_angle"
-    
-    # Library output names
-    angle_egl_library_name = "libEGL_angle.so"
-    angle_glesv2_library_name = "libGLESv2_angle.so"
-  }
+  angle_egl_library_name = "libEGL_angle.so"
+  angle_glesv2_library_name = "libGLESv2_angle.so"
 }
