@@ -18,27 +18,19 @@
 
 # Compiler flags for ARMv8.0-A strict compliance
 declare_args() {
-  # ARMv8.0-A baseline architecture flag
-  armv80_arch_flag = "-march=armv8-a"
-}
-
-declare_args() {
-  # Disable ARMv8.1+ extensions explicitly
-  armv80_disable_extensions = [
-    "-mno-outline-atomics",  # Disable LSE atomics (ARMv8.1)
-    "-mno-crc",              # Disable CRC32 (ARMv8.1)
-    "-mno-fp16",             # Disable FP16 (ARMv8.2)
-    "-mno-dotprod",          # Disable Dot Product (ARMv8.2/8.4)
-    "-mno-sve",              # Disable SVE (ARMv8.2+)
-    "-mno-sve2",             # Disable SVE2 (ARMv8.4+)
-    "-mno-i8mm",             # Disable I8MM (ARMv8.2+)
-    "-mno-bf16",             # Disable BF16 (ARMv8.6+)
+  # ARMv8.0-A baseline architecture flag and disable extensions
+  armv80_strict_flags = [
+    "-march=armv8-a",       # ARMv8.0-A baseline
+    "-mno-outline-atomics", # Disable LSE atomics (ARMv8.1)
+    "-mno-crc",            # Disable CRC32 (ARMv8.1)
+    "-mno-fp16",           # Disable FP16 (ARMv8.2)
+    "-mno-dotprod",        # Disable Dot Product (ARMv8.2/8.4)
+    "-mno-sve",            # Disable SVE (ARMv8.2+)
+    "-mno-sve2",           # Disable SVE2 (ARMv8.4+)
+    "-mno-i8mm",           # Disable I8MM (ARMv8.2+)
+    "-mno-bf16",           # Disable BF16 (ARMv8.6+)
+    "-mtune=generic",      # Prevent native CPU optimization
   ]
-}
-
-declare_args() {
-  # Combined ARMv8.0-A strict flags
-  armv80_strict_flags = armv80_arch_flag + armv80_disable_extensions
 }
 
 # Configuration for Android arm64 ARMv8.0-A strict builds
@@ -53,12 +45,6 @@ config("armv80_android_config") {
     
     # Also apply to assembly flags
     asmflags = armv80_strict_flags
-    
-    # Ensure no native CPU detection
-    # These flags prevent the compiler from using host CPU features
-    cflags += [
-      "-mtune=generic",
-    ]
     
     # Debug: Output architecture info
     defines = [
