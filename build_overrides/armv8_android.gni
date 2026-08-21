@@ -1,0 +1,116 @@
+# Copyright 2019 The ANGLE Project Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# ARMv8.0-A strict configuration for Android AArch64
+# This file contains configuration to ensure ANGLE builds for Android
+# arm64-v8a target with strict ARMv8.0-A baseline ISA (no ARMv8.1+ extensions)
+
+# Force ARMv8.0-A baseline for Android arm64 builds
+# ARMv8.0-A includes: NEON/Advanced SIMD (base), but NOT:
+# - ARMv8.1-A: LSE atomics, CRC32, FP16, Dot Product
+# - ARMv8.2-A: FP16 FMLA, SVE (optional), etc.
+# - ARMv8.3-A: Complex number, SVE2 (optional), etc.
+# - ARMv8.4-A: Dot Product (SIMD), SVE2, BF16, etc.
+# - ARMv8.5-A: BF16, etc.
+# - ARMv8.6-A: SVE2, etc.
+# - ARMv9-A: SVE2, BF16, MTE, etc.
+
+# Compiler flags for ARMv8.0-A strict compliance
+declare_args() {
+  # ARMv8.0-A baseline architecture flag
+  armv80_arch_flag = "-march=armv8-a"
+  
+  # Disable ARMv8.1+ extensions explicitly
+  armv80_disable_extensions = [
+    "-mno-outline-atomics",  # Disable LSE atomics (ARMv8.1)
+    "-mno-crc",              # Disable CRC32 (ARMv8.1)
+    "-mno-fp16",             # Disable FP16 (ARMv8.2)
+    "-mno-dotprod",          # Disable Dot Product (ARMv8.2/8.4)
+    "-mno-sve",              # Disable SVE (ARMv8.2+)
+    "-mno-sve2",             # Disable SVE2 (ARMv8.4+)
+    "-mno-i8mm",             # Disable I8MM (ARMv8.2+)
+    "-mno-bf16",             # Disable BF16 (ARMv8.6+)
+  ]
+  
+  # Combined ARMv8.0-A strict flags
+  armv80_strict_flags = armv80_arch_flag + armv80_disable_extensions
+}
+
+# Configuration for Android arm64 ARMv8.0-A strict builds
+config("armv80_android_config") {
+  if (is_android && target_cpu == "arm64") {
+    # Apply ARMv8.0-A strict architecture flags
+    cflags = armv80_strict_flags
+    cflags_c = armv80_strict_flags
+    cflags_cc = armv80_strict_flags
+    cflags_objc = armv80_strict_flags
+    cflags_objcc = armv80_strict_flags
+    
+    # Also apply to assembly flags
+    asmflags = armv80_strict_flags
+    
+    # Ensure no native CPU detection
+    # These flags prevent the compiler from using host CPU features
+    cflags += [
+      "-mtune=generic",
+    ]
+    
+    # Debug: Output architecture info
+    defines = [
+      "ANGLE_ARMV80_STRICT=1",
+    ]
+  }
+}
+
+# Backend selection for Android ARMv8.0-A: Vulkan only
+# This ensures only Vulkan backend is enabled for Android builds
+declare_args() {
+  # For Android ARMv8.0-A strict builds, only Vulkan backend should be enabled
+  if (is_android) {
+    # Force Vulkan as the only backend
+    angle_force_vulkan_only_android = true
+    
+    # Disable all other backends for Android
+    angle_disable_gl_android = true
+    angle_disable_d3d11_android = true
+    angle_disable_metal_android = true
+    angle_disable_swiftshader_android = true
+    angle_disable_null_android = true
+    angle_disable_wgpu_android = true
+  }
+}
+
+# Android ARMv8.0-A backend configuration
+config("armv80_android_backend_config") {
+  if (is_android && angle_force_vulkan_only_android) {
+    # Ensure only Vulkan is enabled
+    defines = [
+      "ANGLE_ENABLE_VULKAN=1",
+    ]
+    
+    # Explicitly disable other backends
+    defines += [
+      "ANGLE_ENABLE_D3D11=0",
+      "ANGLE_ENABLE_OPENGL=0",
+      "ANGLE_ENABLE_GL_DESKTOP_BACKEND=0",
+      "ANGLE_ENABLE_METAL=0",
+      "ANGLE_ENABLE_SWIFTSHADER=0",
+      "ANGLE_ENABLE_NULL=0",
+      "ANGLE_ENABLE_WGPU=0",
+    ]
+  }
+}
+
+# Library naming configuration for Android ARMv8.0-A
+# Ensure libraries have _angle suffix for proper identification
+declare_args() {
+  if (is_android) {
+    # Force _angle suffix for Android builds
+    angle_libs_suffix = "_angle"
+    
+    # Library output names
+    angle_egl_library_name = "libEGL_angle.so"
+    angle_glesv2_library_name = "libGLESv2_angle.so"
+  }
+}

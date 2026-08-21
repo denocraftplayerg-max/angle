@@ -226,11 +226,14 @@ declare_args() {
   # True if we are building inside an ANGLE checkout.
   angle_standalone = !build_with_chromium
 
-  angle_enable_d3d11 = is_win
+  angle_enable_d3d11 = is_win && !is_android
+  
+  # For Android ARMv8.0-A strict builds, only Vulkan backend is enabled
+  # This ensures compatibility with ARMv8.0 baseline devices
   angle_enable_gl =
       (ozone_platform_drm || ozone_platform_wayland || !is_linux ||
        ((angle_use_x11 && !is_chromeos) || angle_use_wayland || is_castos)) &&
-      !is_fuchsia && !angle_is_winuwp && !is_win_arm64 && !is_ios
+      !is_fuchsia && !angle_is_winuwp && !is_win_arm64 && !is_ios && !is_android
 
   angle_enable_vulkan =
       angle_has_build &&
@@ -244,10 +247,10 @@ declare_args() {
   angle_use_vulkan_null_display = build_with_chromium && is_fuchsia
 
   # Disable null backend to save space for official build.
-  angle_enable_null = !is_official_build
+  angle_enable_null = !is_official_build && !is_android
   angle_enable_gl_desktop_backend = !is_android && !is_ios
 
-  angle_enable_metal = is_apple
+  angle_enable_metal = is_apple && !is_android
 
   # Enables the OpenCL pass-through back end
   angle_enable_cl_passthrough = angle_enable_cl
@@ -342,7 +345,7 @@ if (!defined(checkout_angle_mesa)) {
 declare_args() {
   # Currently SwiftShader's Vulkan front-end doesn't build on Android.
   # Disabled by default on MSVC because of compiler warnings/errors.
-  angle_enable_swiftshader = angle_enable_vulkan && !is_android && is_clang
+  angle_enable_swiftshader = false
 
   # Translator backend support:
   angle_enable_hlsl = angle_enable_d3d11

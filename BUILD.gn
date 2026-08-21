@@ -4,6 +4,7 @@
 
 # import the ozone_platform_x11 variable
 import("gni/angle.gni")
+import("//build_overrides/armv8_android.gni")
 if (angle_enable_vulkan) {
   import("//build_overrides//vulkan_headers.gni")
 }
