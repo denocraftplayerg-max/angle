@@ -2,83 +2,19 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# ARMv8.0-A strict configuration for Android AArch64.
-#
-# This file provides the ARMv8.0-A baseline configuration used by the
-# Android arm64 build. It intentionally does not select a newer ARM
-# architecture or CPU-specific tuning.
-#
-# The architecture baseline is:
-#   AArch64 / ARMv8.0-A
-#
-# The Android ABI remains:
-#   arm64-v8a
-#
-# Important:
-#   - Do not use -march=native.
-#   - Do not use -mcpu=native.
-#   - Do not use ARMv8.1-A or newer architecture targets.
-#   - Do not enable SVE/SVE2/I8MM/BF16 or other post-v8.0 extensions
-#     explicitly.
-#
-# Backend selection is intentionally NOT implemented here. ANGLE's existing
-# build configuration must remain responsible for selecting Vulkan. This file
-# only provides the ARMv8.0-A Android configuration.
-
-
 declare_args() {
-  # ARMv8.0-A strict mode.
+  # ARMv8.0-A baseline for Android AArch64.
   #
-  # Keep this configurable so the configuration can be inspected and
-  # overridden by the GN build when necessary.
+  # Do not use -march=native or -mcpu=native.
+  # Do not select ARMv8.1-A or newer explicitly.
   angle_armv80_strict = true
-}
 
+  angle_armv80_arch_flags = [
+    "-march=armv8-a",
+    "-mtune=generic",
+  ]
 
-# ARMv8.0-A compiler configuration.
-#
-# -march=armv8-a selects the ARMv8-A baseline rather than a newer ARM ISA.
-# -mtune=generic prevents CPU-specific tuning from being selected.
-#
-# Do not add -mcpu=native or -march=native here.
-config("armv80_android_config") {
-  if (is_android && target_cpu == "arm64" && angle_armv80_strict) {
-    cflags = [
-      "-march=armv8-a",
-      "-mtune=generic",
-    ]
-
-    asmflags = [
-      "-march=armv8-a",
-    ]
-
-    defines = [
-      "ANGLE_ARMV80_STRICT=1",
-    ]
-  }
-}
-
-
-# Configuration intended to be added to ANGLE Android arm64 targets.
-#
-# This is kept separate from backend selection. Vulkan must be selected using
-# the existing ANGLE Vulkan build arguments/targets in this revision rather
-# than by injecting custom ANGLE_ENABLE_* preprocessor definitions.
-config("armv80_android_vulkan_config") {
-  if (is_android && target_cpu == "arm64" && angle_armv80_strict) {
-    defines = [
-      "ANGLE_ARMV80_STRICT=1",
-    ]
-  }
-}
-
-
-# Library names used by the Android launcher integration.
-#
-# These values are only configuration values. They do not rename an existing
-# ANGLE target by themselves. The actual target/output names must be verified
-# against the BUILD.gn files in this ANGLE revision.
-declare_args() {
-  angle_egl_library_name = "libEGL_angle.so"
-  angle_glesv2_library_name = "libGLESv2_angle.so"
+  angle_armv80_asm_flags = [
+    "-march=armv8-a",
+  ]
 }
